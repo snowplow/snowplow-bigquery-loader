@@ -15,6 +15,7 @@ import cats.effect.testing.specs2.CatsEffect
 import cats.effect.testkit.TestControl
 import io.grpc.{Status => GrpcStatus, StatusRuntimeException}
 import com.google.cloud.bigquery.{BigQueryError, BigQueryException, FieldList}
+import com.google.api.client.http.{HttpHeaders, HttpResponseException}
 
 import scala.concurrent.duration.DurationLong
 
@@ -30,7 +31,8 @@ class TableManagerSpec extends Specification with CatsEffect {
     Add columns when told to $e1
     Retry adding columns and send alerts when there is a setup exception $e2
     Retry adding columns if there is a transient exception, with limited number of attempts and no monitoring alerts $e3
-    Become healthy after recovering from an earlier setup error $e4
+    Become healthy after recovering from an earlier 'permission denied' setup error $e4_1
+    Become healthy after recovering from an earlier 'account not found' setup error $e4_2
     Become healthy after recovering from an earlier transient error $e5
     Disable future attempts to add columns if the table has too many columns - exception type 1 $e6_1
     Disable future attempts to add columns if the table has too many columns - exception type 2 $e6_2
@@ -73,7 +75,7 @@ class TableManagerSpec extends Specification with CatsEffect {
   }
 
   def e2 = {
-    val mocks = List.fill(100)(Response.ExceptionThrown(testSetupError))
+    val mocks = List.fill(100)(Response.ExceptionThrown(testGrpcPermissionDeniedSetupError))
 
     control(Mocks(addColumnsResults = mocks)).flatMap { c =>
       val testFields = Vector(
@@ -143,8 +145,8 @@ class TableManagerSpec extends Specification with CatsEffect {
     }
   }
 
-  def e4 = {
-    val mocks = List(Response.ExceptionThrown(testSetupError))
+  def e4_common(exception: Throwable) = {
+    val mocks = List(Response.ExceptionThrown(exception))
 
     control(Mocks(addColumnsResults = mocks)).flatMap { c =>
       val testFields = Vector(
@@ -172,6 +174,10 @@ class TableManagerSpec extends Specification with CatsEffect {
       TestControl.executeEmbed(test)
     }
   }
+
+  def e4_1 = e4_common(testGrpcPermissionDeniedSetupError)
+
+  def e4_2 = e4_common(testAccountNotFoundSetupError)
 
   def e5 = {
     val mocks = List(Response.ExceptionThrown(new RuntimeException("boom!")))
@@ -497,8 +503,16 @@ object TableManagerSpec {
 
     }
 
-  def testSetupError: Throwable = {
+  def testGrpcPermissionDeniedSetupError: Throwable = {
     val inner = new StatusRuntimeException(GrpcStatus.PERMISSION_DENIED)
+    inner.setStackTrace(Array()) // don't clutter our test logs
+    val t = new RuntimeException("go away", inner)
+    t.setStackTrace(Array()) // don't clutter our test logs
+    t
+  }
+
+  def testAccountNotFoundSetupError: Throwable = {
+    val inner = new TestAccountNotFoundException
     inner.setStackTrace(Array()) // don't clutter our test logs
     val t = new RuntimeException("go away", inner)
     t.setStackTrace(Array()) // don't clutter our test logs
@@ -507,5 +521,9 @@ object TableManagerSpec {
 
   def testFailedToGetTableError: Throwable =
     new BigQueryException(42, "some message", new BigQueryError("accessdenied", "some location", "some message"))
+
+  private class TestAccountNotFoundException extends HttpResponseException(new HttpResponseException.Builder(400, "", new HttpHeaders())) {
+    override def getMessage: String = "-- account not found"
+  }
 
 }

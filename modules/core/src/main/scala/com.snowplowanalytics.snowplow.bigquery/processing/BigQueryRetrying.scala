@@ -12,6 +12,7 @@ import cats.{Applicative, Eq}
 import cats.effect.Sync
 import cats.implicits._
 import com.google.cloud.bigquery.BigQueryException
+import com.google.api.client.http.HttpResponseException
 import io.grpc.{Status => GrpcStatus, StatusRuntimeException}
 import retry._
 
@@ -37,6 +38,8 @@ object BigQueryRetrying {
       bqe.getMessage
     case sre: StatusRuntimeException if sre.getStatus.getCode === GrpcStatus.Code.PERMISSION_DENIED =>
       sre.getMessage
+    case e: HttpResponseException if Option(e.getMessage).exists(_.contains("account not found")) =>
+      "Service account doesn't exist or is disabled"
   }
 
   def policyForAlterTableWait[F[_]: Applicative](config: Config.Retries): RetryPolicy[F] =
