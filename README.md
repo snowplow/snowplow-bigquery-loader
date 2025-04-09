@@ -19,7 +19,7 @@ Basic usage:
 ```bash
 docker run \
   -v /path/to/config.hocon:/var/config.hocon \
-  snowplow/bigquery-loader-kafka:2.0.0 \
+  snowplow/bigquery-loader-kafka:2.0.1 \
   --config /var/config.hocon \
   --iglu-config /var/iglu.json
 ```
@@ -31,7 +31,7 @@ The GCP bigquery loader reads the stream of enriched events from Pubsub.
 ```bash
 docker run \
   -v /path/to/config.hocon:/var/config.hocon \
-  snowplow/bigquery-loader-pubsub:2.0.0 \
+  snowplow/bigquery-loader-pubsub:2.0.1 \
   --config /var/config.hocon \
   --iglu-config /var/iglu.json
 ```
@@ -43,7 +43,7 @@ The AWS bigquery loader reads the stream of enriched events from Kinesis.
 ```bash
 docker run \
   -v /path/to/config.hocon:/var/config.hocon \
-  snowplow/bigquery-loader-kinesis:2.0.0 \
+  snowplow/bigquery-loader-kinesis:2.0.1 \
   --config /var/config.hocon \
   --iglu-config /var/iglu.json
 ```
@@ -73,7 +73,7 @@ Licensed under the [Snowplow Limited Use License Agreement][license]. _(If you a
 [build-image]: https://github.com/snowplow-incubator/snowplow-bigquery-loader/workflows/CI/badge.svg
 [build]: https://github.com/snowplow-incubator/snowplow-bigquery-loader/actions/workflows/ci.yml
 
-[release-image]: https://img.shields.io/badge/release-2.0.0-blue.svg?style=flat
+[release-image]: https://img.shields.io/badge/release-2.0.1-blue.svg?style=flat
 [releases]: https://github.com/snowplow-incubator/snowplow-biguery-loader/releases
 
 [license]: https://docs.snowplow.io/limited-use-license-1.1

@@ -1,3 +1,7 @@
+Version 2.0.1 (2025-04-09)
+--------------------------
+Handle 'account not found' exception as a setup error
+
 Version 2.0.0 (2025-02-18)
 --------------------------
 Upgrade dependencies
