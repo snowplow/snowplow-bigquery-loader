@@ -81,7 +81,7 @@ object BigQuerySchemaUtils {
     val newColumns = ddlFields
       .filterNot(ddlField => bqFieldNames.contains(ddlField.name))
       .map { ddlField =>
-        bqFieldOf(ddlField)
+        bqFieldOf(ddlField.copy(nullability = Type.Nullability.Nullable))
       }
     FieldList.of((alteredExisting ++ newColumns).asJava)
   }
