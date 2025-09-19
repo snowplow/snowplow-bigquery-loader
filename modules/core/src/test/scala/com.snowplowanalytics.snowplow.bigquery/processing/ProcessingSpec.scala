@@ -23,7 +23,7 @@ import com.snowplowanalytics.snowplow.analytics.scalasdk.Event
 import com.snowplowanalytics.snowplow.analytics.scalasdk.SnowplowEvent.{Contexts, UnstructEvent, unstructEventDecoder}
 import com.snowplowanalytics.snowplow.bigquery.{AtomicDescriptor, MockEnvironment, RuntimeService}
 import com.snowplowanalytics.snowplow.bigquery.MockEnvironment.{Action, Mocks}
-import com.snowplowanalytics.snowplow.sources.TokenedEvents
+import com.snowplowanalytics.snowplow.streams.TokenedEvents
 
 import scala.concurrent.duration.DurationLong
 

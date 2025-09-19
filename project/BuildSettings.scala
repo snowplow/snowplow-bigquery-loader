@@ -53,7 +53,12 @@ object BuildSettings {
   lazy val appSettings = Seq(
     buildInfoKeys := Seq[BuildInfoKey](dockerAlias, name, version),
     buildInfoPackage := "com.snowplowanalytics.snowplow.bigquery",
-    buildInfoOptions += BuildInfoOption.Traits("com.snowplowanalytics.snowplow.runtime.AppInfo")
+    buildInfoOptions += BuildInfoOption.Traits("com.snowplowanalytics.snowplow.runtime.AppInfo"),
+
+    // used in configuration parsing unit tests
+    Test / envVars := Map(
+      "HOSTNAME" -> "test-hostname"
+    )
   ) ++ commonSettings ++ addExampleConfToTestCp
 
   lazy val kafkaSettings = appSettings ++ Seq(
@@ -68,11 +73,7 @@ object BuildSettings {
 
   lazy val kinesisSettings = appSettings ++ Seq(
     name := "bigquery-loader-kinesis",
-    buildInfoKeys += BuildInfoKey("cloud" -> "AWS"),
-    // used in configuration parsing unit tests
-    Test / envVars := Map(
-      "HOSTNAME" -> "test-hostname"
-    )
+    buildInfoKeys += BuildInfoKey("cloud" -> "AWS")
   )
 
   lazy val addExampleConfToTestCp = Seq(

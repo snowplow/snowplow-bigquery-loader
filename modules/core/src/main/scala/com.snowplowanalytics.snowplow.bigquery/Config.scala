@@ -22,9 +22,10 @@ import com.snowplowanalytics.snowplow.runtime.{AcceptedLicense, HttpClient, Metr
 import com.snowplowanalytics.iglu.core.circe.CirceIgluCodecs.schemaCriterionDecoder
 import com.snowplowanalytics.snowplow.runtime.HealthProbe.decoders._
 
-case class Config[+Source, +Sink](
+case class Config[+Factory, +Source, +Sink](
   input: Source,
   output: Config.Output[Sink],
+  streams: Factory,
   batching: Config.Batching,
   cpuParallelism: Config.CpuParallelism,
   retries: Config.Retries,
@@ -40,7 +41,7 @@ case class Config[+Source, +Sink](
 
 object Config {
 
-  case class WithIglu[+Source, +Sink](main: Config[Source, Sink], iglu: ResolverConfig)
+  case class WithIglu[+Factory, +Source, +Sink](main: Config[Factory, Source, Sink], iglu: ResolverConfig)
 
   case class Output[+Sink](good: BigQuery, bad: SinkWithMaxSize[Sink])
 
@@ -98,7 +99,7 @@ object Config {
 
   case class Http(client: HttpClient.Config)
 
-  implicit def decoder[Source: Decoder, Sink: Decoder]: Decoder[Config[Source, Sink]] = {
+  implicit def decoder[Factory: Decoder, Source: Decoder, Sink: Decoder]: Decoder[Config[Factory, Source, Sink]] = {
     implicit val configuration = Configuration.default.withDiscriminator("type")
     implicit val sinkWithMaxSize = for {
       sink <- Decoder[Sink]
@@ -128,7 +129,7 @@ object Config {
     implicit val licenseDecoder =
       AcceptedLicense.decoder(AcceptedLicense.DocumentationLink("https://docs.snowplow.io/limited-use-license-1.1/"))
 
-    deriveConfiguredDecoder[Config[Source, Sink]]
+    deriveConfiguredDecoder[Config[Factory, Source, Sink]]
   }
 
 }

@@ -21,8 +21,15 @@ import com.snowplowanalytics.iglu.core.SchemaCriterion
 import com.snowplowanalytics.iglu.schemaddl.parquet.Field
 import com.snowplowanalytics.snowplow.runtime.{AppHealth, AppInfo, Retrying}
 import com.snowplowanalytics.snowplow.runtime.processing.Coldswap
-import com.snowplowanalytics.snowplow.sources.{EventProcessingConfig, EventProcessor, SourceAndAck, TokenedEvents}
-import com.snowplowanalytics.snowplow.sinks.Sink
+import com.snowplowanalytics.snowplow.streams.{
+  EventProcessingConfig,
+  EventProcessor,
+  ListOfList,
+  Sink,
+  Sinkable,
+  SourceAndAck,
+  TokenedEvents
+}
 import com.snowplowanalytics.snowplow.bigquery.processing.{BigQueryRetrying, TableManager, Writer}
 import com.snowplowanalytics.snowplow.bigquery.MockEnvironment.State
 
@@ -166,15 +173,17 @@ object MockEnvironment {
         IO.pure(None)
     }
 
-  private def testBadSink(mockedResponse: Response[Unit], state: Ref[IO, State]): Sink[IO] =
-    Sink[IO] { batch =>
+  private def testBadSink(mockedResponse: Response[Unit], state: Ref[IO, State]): Sink[IO] = new Sink[IO] {
+    override def sink(batch: ListOfList[Sinkable]): IO[Unit] =
       mockedResponse match {
         case Response.Success(_) =>
           state.update(s => s.copy(actions = s.actions :+ SentToBad(batch.size)))
         case Response.ExceptionThrown(value) =>
           IO.raiseError(value)
       }
-    }
+
+    override def isHealthy: IO[Boolean] = IO.pure(true)
+  }
 
   private def testHttpClient: Client[IO] = Client[IO] { _ =>
     Resource.raiseError[IO, Nothing, Throwable](new RuntimeException("http failure"))

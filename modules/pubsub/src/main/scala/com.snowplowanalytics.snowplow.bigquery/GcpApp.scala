@@ -8,12 +8,12 @@
  */
 package com.snowplowanalytics.snowplow.bigquery
 
-import com.snowplowanalytics.snowplow.sources.pubsub.{PubsubSource, PubsubSourceConfig}
-import com.snowplowanalytics.snowplow.sinks.pubsub.{PubsubSink, PubsubSinkConfig}
+import cats.effect.IO
 
-object GcpApp extends LoaderApp[PubsubSourceConfig, PubsubSinkConfig](BuildInfo) {
+import com.snowplowanalytics.snowplow.streams.pubsub.{PubsubFactory, PubsubFactoryConfig, PubsubSinkConfig, PubsubSourceConfig}
 
-  override def source: SourceProvider = PubsubSource.build(_)
+object GcpApp extends LoaderApp[PubsubFactoryConfig, PubsubSourceConfig, PubsubSinkConfig](BuildInfo) {
 
-  override def badSink: SinkProvider = PubsubSink.resource(_)
+  override def toFactory: FactoryProvider = PubsubFactory.resource[IO](_)
+
 }

@@ -29,8 +29,7 @@ import com.snowplowanalytics.iglu.client.resolver.registries.{Http4sRegistryLook
 import com.snowplowanalytics.snowplow.analytics.scalasdk.Event
 import com.snowplowanalytics.snowplow.badrows.{BadRow, Payload => BadPayload, Processor => BadRowProcessor}
 import com.snowplowanalytics.snowplow.badrows.Payload.{RawPayload => BadRowRawPayload}
-import com.snowplowanalytics.snowplow.sources.{EventProcessingConfig, EventProcessor, TokenedEvents}
-import com.snowplowanalytics.snowplow.sinks.ListOfList
+import com.snowplowanalytics.snowplow.streams.{EventProcessingConfig, EventProcessor, ListOfList, TokenedEvents}
 import com.snowplowanalytics.snowplow.runtime.syntax.foldable._
 import com.snowplowanalytics.snowplow.runtime.processing.BatchUp
 import com.snowplowanalytics.snowplow.runtime.Retrying.showRetryDetails
@@ -181,7 +180,10 @@ object Processing {
     entities: Map[TabledEntity, Set[SchemaSubVersion]]
   ): F[Result] =
     if (env.legacyColumnMode) Sync[F].delay(Result(Vector.empty, Nil))
-    else NonAtomicFields.resolveTypes[F](env.resolver, entities, env.schemasToSkip ::: env.legacyColumns)
+    else
+      NonAtomicFields
+        .resolveTypes[F](env.resolver, entities, env.schemasToSkip ::: env.legacyColumns)
+        .flatMap(possiblyExitOnClashingIgluSchemas(env, _))
 
   private def transformBatch[F[_]: Sync](
     badProcessor: BadRowProcessor,
@@ -428,5 +430,15 @@ object Processing {
       }
       .orElse(o1)
       .orElse(o2)
+
+  private def possiblyExitOnClashingIgluSchemas[F[_]: Sync](
+    env: Environment[F],
+    resolveTypesResult: Either[NonAtomicFields.ResolveTypesException, NonAtomicFields.Result]
+  ): F[NonAtomicFields.Result] =
+    resolveTypesResult match {
+      case Left(e) =>
+        Logger[F].error(e.getMessage) *> env.appHealth.beUnhealthyForRuntimeService(RuntimeService.Iglu) *> Sync[F].raiseError(e)
+      case Right(r) => Applicative[F].pure(r)
+    }
 
 }

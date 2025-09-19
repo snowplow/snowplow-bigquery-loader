@@ -14,7 +14,7 @@ import cats.effect.kernel.Ref
 import cats.implicits._
 import fs2.Stream
 
-import com.snowplowanalytics.snowplow.sources.SourceAndAck
+import com.snowplowanalytics.snowplow.streams.SourceAndAck
 import com.snowplowanalytics.snowplow.runtime.{Metrics => CommonMetrics}
 
 import scala.concurrent.duration.{Duration, FiniteDuration}
