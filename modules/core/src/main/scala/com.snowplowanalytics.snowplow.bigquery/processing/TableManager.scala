@@ -126,7 +126,7 @@ object TableManager {
     def addColumns(columns: Vector[Field]): F[FieldList] =
       for {
         _ <- Logger[F].info(s"Attempting to fetch details of table ${config.dataset}.${config.table}...")
-        table <- Sync[F].blocking(client.getTable(config.dataset, config.table))
+        table <- Sync[F].blocking(client.getTable(BigQueryUtils.tableIdOf(config)))
         _ <- Logger[F].info("Successfully fetched details of table")
         schema <- Sync[F].pure(table.getDefinition[TableDefinition].getSchema)
         fields <- Sync[F].pure(schema.getFields)
@@ -141,7 +141,7 @@ object TableManager {
     def tableExists: F[Boolean] =
       for {
         _ <- Logger[F].info(s"Attempting to fetch details of table ${config.dataset}.${config.table}...")
-        attempt <- Sync[F].blocking(Option(client.getTable(config.dataset, config.table)))
+        attempt <- Sync[F].blocking(Option(client.getTable(BigQueryUtils.tableIdOf(config))))
         result <- attempt match {
                     case Some(_) =>
                       Logger[F].info("Successfully fetched details of table").as(true)
