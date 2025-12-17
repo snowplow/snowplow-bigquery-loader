@@ -13,11 +13,11 @@
     "parallelPullFactor": 0.5
 
     # -- Pubsub ack deadlines are extended for this duration when needed.
-    "durationPerAckExtension": "60 seconds"
+    "durationPerAckExtension": "15 seconds"
 
     # -- Controls when ack deadlines are re-extended, for a message that is close to exceeding its ack deadline.
-    # -- For example, if `durationPerAckExtension` is `60 seconds` and `minRemainingAckDeadline` is `0.1` then the Source
-    # -- will wait until there is `6 seconds` left of the remining deadline, before re-extending the message deadline.
+    # -- For example, if `durationPerAckExtension` is `15 seconds` and `minRemainingAckDeadline` is `0.1` then the Source
+    # -- will wait until there is `1.5 seconds` left of the remining deadline, before re-extending the message deadline.
     "minRemainingAckDeadline": 0.1
 
     # -- How many pubsub messages to pull from the server in a single request.
@@ -27,6 +27,16 @@
     # -- Under some circumstances, this was found to slightly alleviate a problem in which pubsub might re-deliver
     # -- the same messages multiple times.
     "debounceRequests": "100 millis"
+
+    # -- Configures how transient GRPC failures are retried
+    "retries": {
+      "transientErrors": {
+        # -- Backoff delay for follow-up attempts
+        "delay": "100 millis"
+        # -- Max number of attempts, after which Enrich will crash and exit
+        "attempts": 10
+      }
+    }
   }
 
   "output": {
@@ -197,9 +207,6 @@
 
     # -- Set to true to disable telemetry
     "disable": false
-
-    # -- Interval for the heartbeat event
-    "interval": 15 minutes
 
     # -- HTTP method used to send the heartbeat event
     "method": POST

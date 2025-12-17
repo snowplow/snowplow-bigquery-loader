@@ -13,26 +13,26 @@ object Dependencies {
   object V {
     // Scala
     val catsEffect       = "3.5.4"
-    val http4s           = "0.23.16"
+    val http4s           = "0.23.17"
     val decline          = "2.4.1"
     val circe            = "0.14.6"
-    val circeExtra       = "0.14.3"
+    val circeExtra       = "0.14.4"
     val betterMonadicFor = "0.3.1"
     val doobie           = "1.0.0-RC4"
 
     // java
-    val slf4j           = "2.0.12"
-    val azureSdk        = "1.15.1"
+    val slf4j           = "2.0.17"
+    val azureSdk        = "1.18.1"
     val sentry          = "6.25.2"
-    val awsSdk2         = "2.30.17"
-    val bigqueryStorage = "3.11.2"
-    val bigquery        = "2.47.0"
-    val netty           = "4.1.118.Final"
-    val jsonSmart       = "2.5.2"
+    val awsSdk2         = "2.40.9"
+    val bigqueryStorage = "3.19.0"
+    val bigquery        = "2.57.1"
+    val netty           = "4.1.130.Final"
+    val jsonSmart       = "2.6.0"
 
     // Snowplow
-    val streams    = "0.13.1"
-    val igluClient = "4.0.0"
+    val streams    = "0.18.0"
+    val igluClient = "4.0.3"
 
     // tests
     val specs2           = "4.20.0"

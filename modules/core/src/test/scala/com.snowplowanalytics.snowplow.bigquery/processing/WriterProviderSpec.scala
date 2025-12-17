@@ -8,7 +8,6 @@
  */
 package com.snowplowanalytics.snowplow.bigquery.processing
 
-import cats.implicits._
 import cats.effect.{IO, Ref}
 import cats.effect.std.Supervisor
 import com.google.protobuf.Descriptors

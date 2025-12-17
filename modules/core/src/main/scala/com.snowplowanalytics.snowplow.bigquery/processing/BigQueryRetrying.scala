@@ -29,7 +29,7 @@ object BigQueryRetrying {
   )(
     action: F[A]
   ): F[A] =
-    Retrying.withRetries(appHealth, config.transientErrors, config.setupErrors, RuntimeService.BigQueryClient, toAlert, isSetupError)(
+    Retrying.withRetries(appHealth, config.transientErrors, config.setupErrors, RuntimeService.BigQueryClient, toAlert, isSetupError)(_ =>
       action
     )
 

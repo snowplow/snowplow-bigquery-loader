@@ -8,7 +8,6 @@
  */
 package com.snowplowanalytics.snowplow.bigquery.processing
 
-import cats.implicits._
 import cats.effect.{IO, Ref}
 import org.specs2.Specification
 import cats.effect.testing.specs2.CatsEffect
