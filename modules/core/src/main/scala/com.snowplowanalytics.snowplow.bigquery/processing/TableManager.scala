@@ -28,7 +28,6 @@ import com.google.cloud.bigquery.{
 }
 import com.google.auth.Credentials
 import com.google.cloud.bigquery.BigQueryException
-
 import com.snowplowanalytics.iglu.schemaddl.parquet.Field
 import com.snowplowanalytics.snowplow.runtime.{AppHealth, SetupExceptionMessages}
 import com.snowplowanalytics.snowplow.loaders.transform.AtomicFields
@@ -57,7 +56,7 @@ trait TableManager[F[_]] {
 
 object TableManager {
 
-  private implicit def logger[F[_]: Sync] = Slf4jLogger.getLogger[F]
+  private implicit def logger[F[_]: Sync]: Logger[F] = Slf4jLogger.getLogger[F]
 
   trait WithHandledErrors[F[_]] {
     def addColumns(columns: Vector[Field]): F[FieldList]

@@ -21,7 +21,6 @@ import retry.implicits._
 import com.google.cloud.bigquery.FieldList
 
 import scala.concurrent.duration.DurationLong
-
 import java.nio.charset.StandardCharsets
 import scala.concurrent.duration.Duration
 import com.snowplowanalytics.iglu.schemaddl.parquet.{Caster, Field}
@@ -41,7 +40,7 @@ import java.time.Instant
 
 object Processing {
 
-  private implicit def logger[F[_]: Sync] = Slf4jLogger.getLogger[F]
+  private implicit def logger[F[_]: Sync]: Logger[F] = Slf4jLogger.getLogger[F]
 
   def stream[F[_]: Async](env: Environment[F]): Stream[F, Nothing] = {
     implicit val lookup: RegistryLookup[F] = Http4sRegistryLookup(env.httpClient)

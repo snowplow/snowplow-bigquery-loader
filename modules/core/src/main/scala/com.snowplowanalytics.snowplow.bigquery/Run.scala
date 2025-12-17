@@ -16,7 +16,6 @@ import org.typelevel.log4cats.slf4j.Slf4jLogger
 import org.slf4j.bridge.SLF4JBridgeHandler
 import io.circe.Decoder
 import com.monovore.decline.Opts
-
 import com.snowplowanalytics.snowplow.streams.Factory
 import com.snowplowanalytics.snowplow.bigquery.processing.Processing
 import com.snowplowanalytics.snowplow.runtime.{AppInfo, ConfigParser, LogUtils, Telemetry}
@@ -25,7 +24,7 @@ import java.nio.file.Path
 
 object Run {
 
-  private implicit def logger[F[_]: Sync] = Slf4jLogger.getLogger[F]
+  private implicit def logger[F[_]: Sync]: Logger[F] = Slf4jLogger.getLogger[F]
 
   def fromCli[F[_]: Async, FactoryConfig: Decoder, SourceConfig: Decoder, SinkConfig: Decoder](
     appInfo: AppInfo,
