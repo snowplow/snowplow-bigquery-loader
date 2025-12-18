@@ -1,3 +1,15 @@
+Version 2.1.0 (2025-01-13)
+--------------------------
+Override dependencies to fix CVEs
+Update dependencies and common-streams to 0.18.0 (#11)
+Upgrade to Java 21 (#10)
+Add sync workflow for snowplow-bigquery-loader (#9)
+Add Snowman QA test integration (#7)
+Set project name when getting table (#8)
+Add sync workflow for snowplow-bigquery-loader
+Bump common-streams to 0.13.1 (#4)
+Never use `REQUIRED` mode for new nested fields of existing columns (#3)
+
 Version 2.0.1 (2025-04-09)
 --------------------------
 Handle 'account not found' exception as a setup error
