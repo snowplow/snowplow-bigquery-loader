@@ -29,6 +29,8 @@ object Dependencies {
     val bigquery        = "2.57.1"
     val netty           = "4.1.130.Final"
     val jsonSmart       = "2.6.0"
+    val kafkaClients    = "3.9.1"
+    val lz4Java         = "1.10.1"
 
     // Snowplow
     val streams    = "0.18.0"
@@ -57,11 +59,14 @@ object Dependencies {
   val bigquery        = "com.google.cloud"       % "google-cloud-bigquery"        % V.bigquery
   val nettyHandler    = "io.netty"               % "netty-handler"                % V.netty
   val nettyCommon     = "io.netty"               % "netty-common"                 % V.netty
+  val nettyCodecHttp  = "io.netty"               % "netty-codec-http"             % V.netty
   val jsonSmart       = "net.minidev"            % "json-smart"                   % V.jsonSmart
+  val kafkaClients    = "org.apache.kafka"       % "kafka-clients"                % V.kafkaClients exclude ("org.lz4", "lz4-java")
+  val lz4Java         = "at.yawk.lz4"            % "lz4-java"                     % V.lz4Java
 
   val streamsCore      = "com.snowplowanalytics" %% "streams-core"             % V.streams
   val kinesis          = "com.snowplowanalytics" %% "kinesis"                  % V.streams
-  val kafka            = "com.snowplowanalytics" %% "kafka"                    % V.streams
+  val kafka            = "com.snowplowanalytics" %% "kafka"                    % V.streams exclude ("org.lz4", "lz4-java")
   val pubsub           = "com.snowplowanalytics" %% "pubsub"                   % V.streams
   val loaders          = "com.snowplowanalytics" %% "loaders-common"           % V.streams
   val runtime          = "com.snowplowanalytics" %% "runtime-common"           % V.streams
@@ -84,6 +89,7 @@ object Dependencies {
     sentry,
     doobie,
     circeGenericExtra,
+    nettyCommon, // for security vulnerabilities
     specs2,
     catsEffectSpecs2,
     catsEffectTestkit,
@@ -98,7 +104,10 @@ object Dependencies {
     julToSlf4j % Runtime,
     azureIdentity,
     nettyHandler, // for security vulnerabilities
+    nettyCodecHttp, // for security vulnerabilities
     jsonSmart, // for security vulnerabilities
+    kafkaClients, // for security vulnerabilities
+    lz4Java, // for security vulnerabilities
     specs2,
     catsEffectSpecs2
   )
