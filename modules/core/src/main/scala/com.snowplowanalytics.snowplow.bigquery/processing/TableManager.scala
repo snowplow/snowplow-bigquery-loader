@@ -26,6 +26,7 @@ import com.google.cloud.bigquery.{
   TableInfo,
   TimePartitioning
 }
+import com.google.api.gax.rpc.FixedHeaderProvider
 import com.google.auth.Credentials
 import com.google.cloud.bigquery.BigQueryException
 import com.snowplowanalytics.iglu.schemaddl.parquet.Field
@@ -68,7 +69,13 @@ object TableManager {
     credentials: Credentials
   ): F[TableManager[F]] =
     for {
-      client <- Sync[F].delay(BigQueryOptions.newBuilder.setCredentials(credentials).build.getService)
+      client <- Sync[F].delay {
+                  BigQueryOptions.newBuilder
+                    .setCredentials(credentials)
+                    .setHeaderProvider(FixedHeaderProvider.create("user-agent", BigQueryUtils.gcpUserAgent))
+                    .build
+                    .getService
+                }
     } yield impl(config, client)
 
   def withHandledErrors[F[_]: Async](

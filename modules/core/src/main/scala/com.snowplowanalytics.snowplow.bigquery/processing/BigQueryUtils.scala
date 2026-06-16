@@ -20,6 +20,8 @@ import java.io.ByteArrayInputStream
 
 object BigQueryUtils {
 
+  val gcpUserAgent: String = "Google/ISV Solution (GPN:isol_plb32_0014m00002tg62aqad_qufvepzajwfju6jxl5uwg2zn3l3nizte)"
+
   def credentials[F[_]: Sync](config: Config.BigQuery): F[Credentials] =
     config.credentials match {
       case None => Sync[F].blocking(GoogleCredentials.getApplicationDefault)

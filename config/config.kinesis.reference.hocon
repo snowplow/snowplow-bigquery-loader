@@ -175,6 +175,21 @@
   # -- Change to `false` so events go the failed events stream instead of crashing the loader.
   "exitOnMissingIgluSchema": true
 
+  # -- Configures decompression of incoming data
+  "decompression": {
+
+    # -- A cutoff used when incrementally adding events to a batch. The batch is emitted immediately
+    # -- after this cutoff size is reached. This config parameter is needed to protect the app's memory.
+    # -- Bear in mind a 1MB compressed message could become HUGE after decompression.
+    # -- This is also used to batch together events from consecutive compressed records inside a chunk.
+    "maxBytesInBatch": 5242880
+
+    # -- Each individual event should not exceed this size after decompression.
+    # -- Events exceeding this size become a size violation type of bad row.
+    # -- This config parameter is needed to protect the app's memory.
+    "maxBytesSinglePayload": 10000000
+  }
+
   # -- Configuration of internal http client used for iglu resolver, alerts and telemetry
   "http": {
     "client": {
@@ -200,6 +215,15 @@
 
         # -- Prefix used for the metric name when sending to statsd
         "prefix": "snowplow.bigquery.loader"
+      }
+
+      # -- Expose runtime metrics on the Prometheus scrape endpoint served by the health probe port
+      "prometheus": {
+
+        # -- Map of key/value pairs added to every exported metric
+        "tags": {
+          "myTag": "xyz"
+        }
       }
     }
 
@@ -232,9 +256,6 @@
 
     # -- Set to true to disable telemetry
     "disable": false
-
-    # -- HTTP method used to send the heartbeat event
-    "method": POST
 
     # -- URI of the collector receiving the heartbeat event
     "collectorUri": "https://collector-g.snowplowanalytics.com"

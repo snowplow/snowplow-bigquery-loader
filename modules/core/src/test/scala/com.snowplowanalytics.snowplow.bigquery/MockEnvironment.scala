@@ -8,7 +8,6 @@
  */
 package com.snowplowanalytics.snowplow.bigquery
 
-import cats.implicits._
 import cats.effect.IO
 import cats.effect.kernel.{Ref, Resource, Unique}
 import org.http4s.client.Client
@@ -30,6 +29,7 @@ import com.snowplowanalytics.snowplow.streams.{
   SourceAndAck,
   TokenedEvents
 }
+import com.snowplowanalytics.snowplow.streams.compression.DecompressionConfig
 import com.snowplowanalytics.snowplow.bigquery.processing.{BigQueryRetrying, TableManager, Writer}
 import com.snowplowanalytics.snowplow.bigquery.MockEnvironment.State
 
@@ -43,7 +43,7 @@ object MockEnvironment {
   object Action {
     case object CreatedTable extends Action
     case class Checkpointed(tokens: List[Unique.Token]) extends Action
-    case class SentToBad(count: Long) extends Action
+    case class SentToBad(count: Int) extends Action
     case class AlterTableAddedColumns(columns: Vector[String]) extends Action
     case object OpenedWriter extends Action
     case object ClosedWriter extends Action
@@ -57,7 +57,11 @@ object MockEnvironment {
   }
   import Action._
 
-  case class State(actions: Vector[Action], writtenToBQ: Iterable[Map[String, AnyRef]])
+  case class State(
+    actions: Vector[Action],
+    writtenToBQ: Iterable[Map[String, AnyRef]],
+    writtenToBad: Vector[String]
+  )
 
   /**
    * Build a mock environment for testing
@@ -78,7 +82,7 @@ object MockEnvironment {
     legacyColumnMode: Boolean
   ): Resource[IO, MockEnvironment] =
     for {
-      state <- Resource.eval(Ref[IO].of(State(Vector.empty[Action], Nil)))
+      state <- Resource.eval(Ref[IO].of(State(Vector.empty[Action], Nil, Vector.empty[String])))
       writerResource <- Resource.eval(testWriter(state, mocks.writerResponses, mocks.descriptors))
       writerColdswap <- Coldswap.make(writerResource)
     } yield {
@@ -106,7 +110,8 @@ object MockEnvironment {
         schemasToSkip           = List.empty,
         legacyColumns           = legacyColumns,
         legacyColumnMode        = legacyColumnMode,
-        exitOnMissingIgluSchema = false
+        exitOnMissingIgluSchema = false,
+        decompression           = mocks.decompression
       )
       MockEnvironment(state, env)
     }
@@ -115,7 +120,8 @@ object MockEnvironment {
     writerResponses: List[Response[Writer.WriteResult]],
     badSinkResponse: Response[Unit],
     addColumnsResponse: Response[FieldList],
-    descriptors: List[Descriptors.Descriptor]
+    descriptors: List[Descriptors.Descriptor],
+    decompression: DecompressionConfig = DecompressionConfig(maxBytesInBatch = 5242880, maxBytesSinglePayload = 10000000)
   )
 
   object Mocks {
@@ -177,7 +183,8 @@ object MockEnvironment {
     override def sink(batch: ListOfList[Sinkable]): IO[Unit] =
       mockedResponse match {
         case Response.Success(_) =>
-          state.update(s => s.copy(actions = s.actions :+ SentToBad(batch.size)))
+          val strings = batch.asIterable.map(s => new String(s.bytes, java.nio.charset.StandardCharsets.UTF_8)).toVector
+          state.update(s => s.copy(actions = s.actions :+ SentToBad(batch.asIterable.size), writtenToBad = s.writtenToBad ++ strings))
         case Response.ExceptionThrown(value) =>
           IO.raiseError(value)
       }
@@ -257,6 +264,8 @@ object MockEnvironment {
 
     def setE2ELatency(e2eLatency: FiniteDuration): IO[Unit] =
       ref.update(s => s.copy(actions = s.actions :+ SetE2ELatencyMetric(e2eLatency)))
+
+    def scrape: IO[String] = IO.pure("")
 
     def report: Stream[IO, Nothing] = Stream.never[IO]
   }

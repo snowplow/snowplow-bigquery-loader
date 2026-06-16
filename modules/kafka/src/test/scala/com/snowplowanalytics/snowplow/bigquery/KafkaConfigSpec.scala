@@ -13,9 +13,9 @@ import cats.effect.testing.specs2.CatsEffect
 import cats.effect.{ExitCode, IO}
 import com.comcast.ip4s.Port
 import com.snowplowanalytics.iglu.core.SchemaCriterion
-import com.snowplowanalytics.snowplow.bigquery.Config.GcpUserAgent
-import com.snowplowanalytics.snowplow.runtime.Metrics.StatsdConfig
-import com.snowplowanalytics.snowplow.runtime.{AcceptedLicense, ConfigParser, HttpClient, Retrying, Telemetry, Webhook}
+import com.snowplowanalytics.snowplow.runtime.{Metrics => CommonMetrics}
+import com.snowplowanalytics.snowplow.runtime.{AcceptedLicense, ConfigParser, HttpClient, Retrying, Sentry, Telemetry, Webhook}
+import com.snowplowanalytics.snowplow.streams.compression.DecompressionConfig
 import com.snowplowanalytics.snowplow.streams.kafka.{KafkaSinkConfig, KafkaSinkConfigM, KafkaSourceConfig}
 import org.http4s.implicits.http4sLiteralsSyntax
 import org.specs2.Specification
@@ -74,11 +74,10 @@ object KafkaConfigSpec {
     ),
     output = Config.Output(
       good = Config.BigQuery(
-        project      = "my-project",
-        dataset      = "my-dataset",
-        table        = "events",
-        gcpUserAgent = GcpUserAgent(productName = "Snowplow OSS"),
-        credentials  = None
+        project     = "my-project",
+        dataset     = "my-dataset",
+        table       = "events",
+        credentials = None
       ),
       bad = Config.SinkWithMaxSize(
         sink = KafkaSinkConfigM[Id](
@@ -120,7 +119,7 @@ object KafkaConfigSpec {
       moduleVersion   = None
     ),
     monitoring = Config.Monitoring(
-      metrics     = Config.Metrics(None),
+      metrics     = Config.Metrics(None, CommonMetrics.PrometheusConfig(Map.empty)),
       sentry      = None,
       healthProbe = Config.HealthProbe(port = Port.fromInt(8000).get, unhealthyLatency = 5.minutes),
       webhook     = Webhook.Config(endpoint = None, tags = Map.empty, heartbeat = 5.minutes)
@@ -130,6 +129,7 @@ object KafkaConfigSpec {
     legacyColumns           = List.empty,
     legacyColumnMode        = false,
     exitOnMissingIgluSchema = true,
+    decompression           = DecompressionConfig(maxBytesInBatch = 5242880, maxBytesSinglePayload = 10000000),
     http                    = Config.Http(HttpClient.Config(4))
   )
 
@@ -152,11 +152,10 @@ object KafkaConfigSpec {
     ),
     output = Config.Output(
       good = Config.BigQuery(
-        project      = "my-project",
-        dataset      = "my-dataset",
-        table        = "events",
-        gcpUserAgent = GcpUserAgent(productName = "Snowplow OSS"),
-        credentials  = None
+        project     = "my-project",
+        dataset     = "my-dataset",
+        table       = "events",
+        credentials = None
       ),
       bad = Config.SinkWithMaxSize(
         sink = KafkaSinkConfigM[Id](
@@ -200,16 +199,17 @@ object KafkaConfigSpec {
     monitoring = Config.Monitoring(
       metrics = Config.Metrics(
         statsd = Some(
-          StatsdConfig(
+          CommonMetrics.StatsdConfig(
             hostname = "127.0.0.1",
             port     = 8125,
             tags     = Map("myTag" -> "xyz"),
             period   = 1.minute,
             prefix   = "snowplow.bigquery.loader"
           )
-        )
+        ),
+        prometheus = CommonMetrics.PrometheusConfig(Map("myTag" -> "xyz"))
       ),
-      sentry = Some(Config.SentryM[Id](dsn = "https://public@sentry.example.com/1", tags = Map("myTag" -> "xyz"))),
+      sentry = Some(Sentry.ConfigM[Id](dsn = "https://public@sentry.example.com/1", environment = None, tags = Map("myTag" -> "xyz"))),
       healthProbe = Config.HealthProbe(
         port             = Port.fromInt(8000).get,
         unhealthyLatency = 5.minutes
@@ -230,6 +230,7 @@ object KafkaConfigSpec {
     ),
     legacyColumnMode        = false,
     exitOnMissingIgluSchema = true,
+    decompression           = DecompressionConfig(maxBytesInBatch = 5242880, maxBytesSinglePayload = 10000000),
     http                    = Config.Http(HttpClient.Config(4))
   )
 }

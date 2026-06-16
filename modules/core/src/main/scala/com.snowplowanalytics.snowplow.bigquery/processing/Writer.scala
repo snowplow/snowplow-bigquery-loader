@@ -121,7 +121,7 @@ object Writer {
     credentials: Credentials
   ): Resource[F, Builder[F]] =
     for {
-      client <- createWriteClient(config, credentials)
+      client <- createWriteClient(credentials)
     } yield new Builder[F] {
       def build: F[CloseableWriter[F]] =
         buildWriter[F](config, client)
@@ -212,12 +212,11 @@ object Writer {
   }
 
   private def createWriteClient[F[_]: Sync](
-    config: Config.BigQuery,
     credentials: Credentials
   ): Resource[F, BigQueryWriteClient] = {
     val make = Sync[F].delay {
       val settingsBuilder = BigQueryWriteSettings.newBuilder
-        .setHeaderProvider(FixedHeaderProvider.create("user-agent", s"${config.gcpUserAgent.productName}/bigquery-loader (GPN:Snowplow;)"))
+        .setHeaderProvider(FixedHeaderProvider.create("user-agent", BigQueryUtils.gcpUserAgent))
       settingsBuilder.getStubSettingsBuilder.setCredentialsProvider(credentialsProvider(credentials))
       BigQueryWriteClient.create(settingsBuilder.build)
     }

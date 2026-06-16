@@ -10,9 +10,10 @@ package com.snowplowanalytics.snowplow.bigquery.processing
 
 import cats.implicits._
 import cats.{Applicative, Foldable}
+import cats.data.NonEmptyList
 import cats.effect.{Async, Sync}
 import cats.effect.kernel.Unique
-import fs2.{Chunk, Pipe, Stream}
+import fs2.{Pipe, Stream}
 import io.circe.syntax._
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
@@ -25,10 +26,11 @@ import java.nio.charset.StandardCharsets
 import scala.concurrent.duration.Duration
 import com.snowplowanalytics.iglu.schemaddl.parquet.{Caster, Field}
 import com.snowplowanalytics.iglu.client.resolver.registries.{Http4sRegistryLookup, RegistryLookup}
-import com.snowplowanalytics.snowplow.analytics.scalasdk.Event
+import com.snowplowanalytics.snowplow.analytics.scalasdk.{Event, ParsingError}
 import com.snowplowanalytics.snowplow.badrows.{BadRow, Payload => BadPayload, Processor => BadRowProcessor}
 import com.snowplowanalytics.snowplow.badrows.Payload.{RawPayload => BadRowRawPayload}
-import com.snowplowanalytics.snowplow.streams.{EventProcessingConfig, EventProcessor, ListOfList, TokenedEvents}
+import com.snowplowanalytics.snowplow.streams.{EventProcessingConfig, ListOfList}
+import com.snowplowanalytics.snowplow.streams.compression.Decompression._
 import com.snowplowanalytics.snowplow.runtime.syntax.foldable._
 import com.snowplowanalytics.snowplow.runtime.processing.BatchUp
 import com.snowplowanalytics.snowplow.runtime.Retrying.showRetryDetails
@@ -45,9 +47,16 @@ object Processing {
   def stream[F[_]: Async](env: Environment[F]): Stream[F, Nothing] = {
     implicit val lookup: RegistryLookup[F] = Http4sRegistryLookup(env.httpClient)
     val eventProcessingConfig              = EventProcessingConfig(EventProcessingConfig.NoWindowing, env.metrics.setLatency)
+    val badProcessor                       = BadRowProcessor(env.appInfo.name, env.appInfo.version)
     Stream.eval(env.tableManager.createTableIfNotExists) *>
       Stream.eval(env.writer.opened.use_) *>
-      env.source.stream(eventProcessingConfig, eventProcessor(env))
+      env.source.decompressedStream(
+        eventProcessingConfig,
+        env.decompression,
+        eventProcessor(env, badProcessor),
+        badProcessor,
+        toBadRow(badProcessor)
+      )
   }
 
   /** Model used between stages of the processing pipeline */
@@ -56,7 +65,7 @@ object Processing {
     events: List[Event],
     parseFailures: List[BadRow],
     countBytes: Long,
-    token: Unique.Token,
+    token: Option[Unique.Token],
     earliestCollectorTstamp: Option[Instant]
   )
 
@@ -100,11 +109,10 @@ object Processing {
   )
 
   private def eventProcessor[F[_]: Async: RegistryLookup](
-    env: Environment[F]
-  ): EventProcessor[F] = { in =>
-    val badProcessor = BadRowProcessor(env.appInfo.name, env.appInfo.version)
-
-    in.through(parseBytes(badProcessor, env.cpuParallelism.parseBytes))
+    env: Environment[F],
+    badProcessor: BadRowProcessor
+  ): DecompressedEventProcessor[F] =
+    _.through(parseBytes(badProcessor, env.cpuParallelism.parseBytes))
       .through(BatchUp.withTimeout(env.batching.maxBytes, env.batching.maxDelay))
       .through(transform(env, badProcessor, env.cpuParallelism.transform))
       .through(handleSchemaEvolution(env))
@@ -113,7 +121,16 @@ object Processing {
       .through(sendFailedEvents(env, badProcessor))
       .through(sendMetrics(env))
       .through(emitTokens)
-  }
+
+  private def toBadRow(processor: BadRowProcessor): DecompressionError => BadRow.LoaderParsingError =
+    err =>
+      BadRow.LoaderParsingError(
+        processor,
+        ParsingError.RowDecodingError(
+          NonEmptyList.of(ParsingError.RowDecodingErrorInfo.UnhandledRowDecodingError(err.message))
+        ),
+        BadRowRawPayload(err.payload)
+      )
 
   private def setE2ELatencyMetric[F[_]: Sync](env: Environment[F]): Pipe[F, BatchAfterTransform, BatchAfterTransform] =
     _.evalTap {
@@ -129,11 +146,15 @@ object Processing {
     }
 
   /** Parse raw bytes into Event using analytics sdk */
-  private def parseBytes[F[_]: Async](badProcessor: BadRowProcessor, parallelism: Int): Pipe[F, TokenedEvents, ParseResult] =
-    _.parEvalMap(parallelism) { case TokenedEvents(chunk, token) =>
+  private def parseBytes[F[_]: Async](
+    badProcessor: BadRowProcessor,
+    parallelism: Int
+  ): Pipe[F, DecompressedTokenedEvents, ParseResult] =
+    _.parEvalMap(parallelism) { result =>
+      val payloads = result.payloads
       for {
-        numBytes <- Sync[F].delay(Foldable[Chunk].sumBytes(chunk))
-        (badRows, events) <- Foldable[Chunk].traverseSeparateUnordered(chunk) { byteBuffer =>
+        numBytes <- Sync[F].delay(payloads.foldLeft(0L)(_ + _.remaining().toLong))
+        (badRows, events) <- Foldable[List].traverseSeparateUnordered(payloads) { byteBuffer =>
                                Sync[F].delay {
                                  Event.parseBytes(byteBuffer).toEither.leftMap { failure =>
                                    val payload = BadRowRawPayload(StandardCharsets.UTF_8.decode(byteBuffer).toString)
@@ -142,7 +163,13 @@ object Processing {
                                }
                              }
         earliestCollectorTstamp = events.view.map(_.collector_tstamp).minOption
-      } yield ParseResult(events, badRows, numBytes, token, earliestCollectorTstamp)
+      } yield ParseResult(
+        events,
+        badRows ::: result.bad,
+        numBytes,
+        result.ack,
+        earliestCollectorTstamp
+      )
     }
 
   /** Transform the Event into values compatible with the BigQuery sdk */
@@ -372,7 +399,7 @@ object Processing {
       } else Applicative[F].unit
     }
 
-  private def sendMetrics[F[_]: Applicative, A](env: Environment[F]): Pipe[F, BatchAfterTransform, BatchAfterTransform] =
+  private def sendMetrics[F[_]: Applicative](env: Environment[F]): Pipe[F, BatchAfterTransform, BatchAfterTransform] =
     _.evalTap { batch =>
       env.metrics.addGood(batch.origBatchCount - batch.badAccumulated.size) *> env.metrics.addBad(batch.badAccumulated.size)
     }
@@ -389,7 +416,7 @@ object Processing {
         parseFailures = b.parseFailures.prepend(a.parseFailures),
         countBytes    = b.countBytes + a.countBytes,
         entities      = Foldable[List].foldMap(a.events)(TabledEntity.forEvent(_)) |+| b.entities,
-        tokens        = b.tokens :+ a.token,
+        tokens        = b.tokens :++ a.token,
         chooseEarliestTstamp(a.earliestCollectorTstamp, b.earliestCollectorTstamp)
       )
     def single(a: ParseResult): Batched = {
@@ -399,7 +426,7 @@ object Processing {
         ListOfList.of(List(a.parseFailures)),
         a.countBytes,
         entities,
-        Vector(a.token),
+        a.token.toVector,
         a.earliestCollectorTstamp
       )
     }

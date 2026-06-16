@@ -9,16 +9,16 @@
 package com.snowplowanalytics.snowplow.bigquery
 
 import cats.implicits._
-import cats.effect.{Async, Resource, Sync}
+import cats.effect.{Async, Resource}
 import org.http4s.client.Client
-import io.sentry.Sentry
 import retry.RetryPolicy
 
 import com.snowplowanalytics.iglu.client.resolver.Resolver
 import com.snowplowanalytics.iglu.core.SchemaCriterion
 import com.snowplowanalytics.snowplow.streams.{Factory, Sink, SourceAndAck}
+import com.snowplowanalytics.snowplow.streams.compression.DecompressionConfig
 import com.snowplowanalytics.snowplow.bigquery.processing.{BigQueryRetrying, BigQueryUtils, TableManager, Writer}
-import com.snowplowanalytics.snowplow.runtime.{AppHealth, AppInfo, HealthProbe, HttpClient, Webhook}
+import com.snowplowanalytics.snowplow.runtime.{AppHealth, AppInfo, HealthProbe, HttpClient, Sentry, Webhook}
 
 case class Environment[F[_]](
   appInfo: AppInfo,
@@ -37,7 +37,8 @@ case class Environment[F[_]](
   schemasToSkip: List[SchemaCriterion],
   legacyColumns: List[SchemaCriterion],
   legacyColumnMode: Boolean,
-  exitOnMissingIgluSchema: Boolean
+  exitOnMissingIgluSchema: Boolean,
+  decompression: DecompressionConfig
 )
 
 case class CpuParallelism(parseBytes: Int, transform: Int)
@@ -50,19 +51,19 @@ object Environment {
     toFactory: FactoryConfig => Resource[F, Factory[F, SourceConfig, SinkConfig]]
   ): Resource[F, Environment[F]] =
     for {
-      _ <- enableSentry[F](appInfo, config.main.monitoring.sentry)
+      _ <- Sentry.enable[F](appInfo, config.main.monitoring.sentry)
       factory <- toFactory(config.main.streams)
       sourceAndAck <- factory.source(config.main.input)
       sourceReporter = sourceAndAck.isHealthy(config.main.monitoring.healthProbe.unhealthyLatency).map(_.showIfUnhealthy)
       appHealth <- Resource.eval(AppHealth.init[F, Alert, RuntimeService](List(sourceReporter)))
+      metrics <- Metrics.build(config.main.monitoring.metrics, sourceAndAck)
       resolver <- mkResolver[F](config.iglu)
       httpClient <- HttpClient.resource[F](config.main.http.client)
-      _ <- HealthProbe.resource(config.main.monitoring.healthProbe.port, appHealth)
+      _ <- HealthProbe.resource(config.main.monitoring.healthProbe.port, appHealth, metrics.scrape)
       _ <- Webhook.resource(config.main.monitoring.webhook, appInfo, httpClient, appHealth)
       badSink <- factory
                    .sink(config.main.output.bad.sink)
                    .onError(_ => Resource.eval(appHealth.beUnhealthyForRuntimeService(RuntimeService.BadSink)))
-      metrics <- Resource.eval(Metrics.build(config.main.monitoring.metrics, sourceAndAck))
       creds <- Resource.eval(BigQueryUtils.credentials(config.main.output.good))
       tableManager <- Resource.eval(TableManager.make(config.main.output.good, creds))
       tableManagerWrapped <- Resource.eval(TableManager.withHandledErrors(tableManager, config.main.retries, appHealth))
@@ -89,29 +90,9 @@ object Environment {
       schemasToSkip           = config.main.skipSchemas,
       legacyColumns           = config.main.legacyColumns,
       legacyColumnMode        = config.main.legacyColumnMode,
-      exitOnMissingIgluSchema = config.main.exitOnMissingIgluSchema
+      exitOnMissingIgluSchema = config.main.exitOnMissingIgluSchema,
+      decompression           = config.main.decompression
     )
-
-  private def enableSentry[F[_]: Sync](appInfo: AppInfo, config: Option[Config.Sentry]): Resource[F, Unit] =
-    config match {
-      case Some(c) =>
-        val acquire = Sync[F].delay {
-          Sentry.init { options =>
-            options.setDsn(c.dsn)
-            options.setRelease(appInfo.version)
-            c.tags.foreach { case (k, v) =>
-              options.setTag(k, v)
-            }
-          }
-        }
-
-        Resource.makeCase(acquire) {
-          case (_, Resource.ExitCase.Errored(e)) => Sync[F].delay(Sentry.captureException(e)).void
-          case _                                 => Sync[F].unit
-        }
-      case None =>
-        Resource.unit[F]
-    }
 
   private def mkResolver[F[_]: Async](resolverConfig: Resolver.ResolverConfig): Resource[F, Resolver[F]] =
     Resource.eval {

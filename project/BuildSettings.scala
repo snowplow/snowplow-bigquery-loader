@@ -25,7 +25,7 @@ object BuildSettings {
 
   lazy val commonSettings = Seq(
     organization := "com.snowplowanalytics",
-    scalaVersion := "2.13.16",
+    scalaVersion := "2.13.18",
     scalafmtConfig := file(".scalafmt.conf"),
     scalafmtOnCompile := false,
     scalacOptions += "-release:21",

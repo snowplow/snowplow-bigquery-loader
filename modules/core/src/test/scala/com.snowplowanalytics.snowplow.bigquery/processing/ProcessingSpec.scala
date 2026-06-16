@@ -9,6 +9,8 @@
 package com.snowplowanalytics.snowplow.bigquery.processing
 
 import cats.effect.IO
+import cats.effect.kernel.Unique
+import cats.syntax.all._
 import fs2.{Chunk, Stream}
 import org.specs2.Specification
 import cats.effect.testing.specs2.CatsEffect
@@ -24,6 +26,8 @@ import com.snowplowanalytics.snowplow.analytics.scalasdk.SnowplowEvent.{Contexts
 import com.snowplowanalytics.snowplow.bigquery.{AtomicDescriptor, MockEnvironment, RuntimeService}
 import com.snowplowanalytics.snowplow.bigquery.MockEnvironment.{Action, Mocks}
 import com.snowplowanalytics.snowplow.streams.TokenedEvents
+import com.snowplowanalytics.snowplow.streams.compression.{Compressor, DecompressionConfig, GzipCompressor, ZstdCompressor}
+import com.github.luben.zstd.ZstdOutputStream
 
 import scala.concurrent.duration.DurationLong
 
@@ -53,6 +57,11 @@ class ProcessingSpec extends Specification with CatsEffect {
     Crash and exit for an unknown schema, if exitOnMissingIgluSchema is true $e12 $e12Legacy
     Not resolve a v2 non atomic field when legacyColumnMode is enabled $e13
     Resolve a v2 non atomic field when legacyColumnMode is disabled $e13_full_legacy
+    Decompress and insert zstd compressed events $decompressZstd
+    Decompress and insert gzip compressed events $decompressGzip
+    Decompress and insert mixed plain, zstd, and gzip events $decompressMixed
+    Fail a corrupt zstd payload as a loader parsing error $decompressCorrupt
+    Fail an oversized decompressed record as a size violation and insert the rest $decompressOversized
   """
 
   def e1 = {
@@ -696,6 +705,126 @@ class ProcessingSpec extends Specification with CatsEffect {
 
   def e13             = e13_base(legacyColumnMode = true)
   def e13_full_legacy = e13_base(legacyColumnMode = false)
+
+  def decompressZstd = {
+    val collectorTstamp = Instant.parse("2023-10-24T10:00:00.000Z")
+    val processTime     = Instant.parse("2023-10-24T10:00:42.123Z")
+    val io = runTest(inputEvents(count = 1, goodZstdCompressed(optCollectorTstamp = Option(collectorTstamp)))) { case (inputs, control) =>
+      for {
+        _ <- IO.sleep(processTime.toEpochMilli.millis)
+        _ <- Processing.stream(control.environment).compile.drain
+        state <- control.state.get
+      } yield state.actions should beEqualTo(
+        Vector(
+          Action.CreatedTable,
+          Action.OpenedWriter,
+          Action.WroteRowsToBigQuery(2),
+          Action.SetE2ELatencyMetric(42123.millis),
+          Action.AddedGoodCountMetric(2),
+          Action.AddedBadCountMetric(0),
+          Action.Checkpointed(List(inputs(0).ack))
+        )
+      )
+    }
+    TestControl.executeEmbed(io)
+  }
+
+  def decompressGzip = {
+    val collectorTstamp = Instant.parse("2023-10-24T10:00:00.000Z")
+    val processTime     = Instant.parse("2023-10-24T10:00:42.123Z")
+    val io = runTest(inputEvents(count = 1, goodGzipCompressed(optCollectorTstamp = Option(collectorTstamp)))) { case (inputs, control) =>
+      for {
+        _ <- IO.sleep(processTime.toEpochMilli.millis)
+        _ <- Processing.stream(control.environment).compile.drain
+        state <- control.state.get
+      } yield state.actions should beEqualTo(
+        Vector(
+          Action.CreatedTable,
+          Action.OpenedWriter,
+          Action.WroteRowsToBigQuery(2),
+          Action.SetE2ELatencyMetric(42123.millis),
+          Action.AddedGoodCountMetric(2),
+          Action.AddedBadCountMetric(0),
+          Action.Checkpointed(List(inputs(0).ack))
+        )
+      )
+    }
+    TestControl.executeEmbed(io)
+  }
+
+  def decompressMixed = {
+    val collectorTstamp = Instant.parse("2023-10-24T10:00:00.000Z")
+    val processTime     = Instant.parse("2023-10-24T10:00:42.123Z")
+    val io = runTest(inputEvents(count = 1, goodMixedCompressed(optCollectorTstamp = Option(collectorTstamp)))) { case (inputs, control) =>
+      for {
+        _ <- IO.sleep(processTime.toEpochMilli.millis)
+        _ <- Processing.stream(control.environment).compile.drain
+        state <- control.state.get
+      } yield state.actions should beEqualTo(
+        Vector(
+          Action.CreatedTable,
+          Action.OpenedWriter,
+          Action.WroteRowsToBigQuery(3),
+          Action.SetE2ELatencyMetric(42123.millis),
+          Action.AddedGoodCountMetric(3),
+          Action.AddedBadCountMetric(0),
+          Action.Checkpointed(List(inputs(0).ack))
+        )
+      )
+    }
+    TestControl.executeEmbed(io)
+  }
+
+  def decompressCorrupt =
+    runTest(inputEvents(count = 1, corruptZstdCompressed)) { case (inputs, control) =>
+      for {
+        _ <- Processing.stream(control.environment).compile.drain
+        state <- control.state.get
+      } yield (state.actions should beEqualTo(
+        Vector(
+          Action.CreatedTable,
+          Action.OpenedWriter,
+          Action.SentToBad(1),
+          Action.AddedGoodCountMetric(0),
+          Action.AddedBadCountMetric(1),
+          Action.Checkpointed(List(inputs(0).ack))
+        )
+      )) and
+        (state.writtenToBad must haveSize(1)) and
+        (state.writtenToBad(0) must contain("loader_parsing_error")) and
+        (state.writtenToBad(0) must contain("corrupt zstd-compressed payload"))
+    }
+
+  def decompressOversized = {
+    val collectorTstamp = Instant.parse("2023-10-24T10:00:00.000Z")
+    val processTime     = Instant.parse("2023-10-24T10:00:42.123Z")
+    val mocks = Mocks.default.copy(
+      decompression = DecompressionConfig(maxBytesInBatch = 5242880, maxBytesSinglePayload = 1000)
+    )
+    val io = runTest(
+      inputEvents(count = 1, goodWithOversizedRecord(optCollectorTstamp = Option(collectorTstamp), oversizedBytes = 2000)),
+      mocks
+    ) { case (inputs, control) =>
+      for {
+        _ <- IO.sleep(processTime.toEpochMilli.millis)
+        _ <- Processing.stream(control.environment).compile.drain
+        state <- control.state.get
+      } yield state.actions should beEqualTo(
+        Vector(
+          Action.CreatedTable,
+          Action.OpenedWriter,
+          Action.WroteRowsToBigQuery(1),
+          Action.SetE2ELatencyMetric(42123.millis),
+          Action.SentToBad(1),
+          Action.AddedGoodCountMetric(1),
+          Action.AddedBadCountMetric(1),
+          Action.Checkpointed(List(inputs(0).ack))
+        )
+      )
+    }
+    TestControl.executeEmbed(io)
+  }
+
 }
 
 object ProcessingSpec {
@@ -747,4 +876,73 @@ object ProcessingSpec {
       val serialized = Chunk("nonsense1", "nonsense2").map(s => ByteBuffer.wrap(s.getBytes(StandardCharsets.UTF_8)))
       TokenedEvents(serialized, token)
     }
+
+  private val zstdFactory = ZstdCompressor.factory(3)
+  private val gzipFactory = GzipCompressor.factory(6)
+
+  def goodZstdCompressed(optCollectorTstamp: Option[Instant] = None): IO[TokenedEvents] =
+    mkEventBytes(2, optCollectorTstamp).map { case (ack, bytes) =>
+      TokenedEvents(Chunk(compress(zstdFactory, bytes)), ack)
+    }
+
+  def goodGzipCompressed(optCollectorTstamp: Option[Instant] = None): IO[TokenedEvents] =
+    mkEventBytes(2, optCollectorTstamp).map { case (ack, bytes) =>
+      TokenedEvents(Chunk(compress(gzipFactory, bytes)), ack)
+    }
+
+  def goodMixedCompressed(optCollectorTstamp: Option[Instant] = None): IO[TokenedEvents] =
+    mkEventBytes(3, optCollectorTstamp).map { case (ack, bytes) =>
+      val plain          = ByteBuffer.wrap(bytes(0))
+      val zstdCompressed = compress(zstdFactory, List(bytes(1)))
+      val gzipCompressed = compress(gzipFactory, List(bytes(2)))
+      TokenedEvents(Chunk(plain, zstdCompressed, gzipCompressed), ack)
+    }
+
+  def corruptZstdCompressed: IO[TokenedEvents] =
+    IO.unique.map { token =>
+      val baos = new java.io.ByteArrayOutputStream()
+      val zstd = new ZstdOutputStream(baos)
+      zstd.write(1) // compression format version
+      zstd.write(1) // payload format version
+      val sizeBytes = ByteBuffer.allocate(4)
+      sizeBytes.order(java.nio.ByteOrder.BIG_ENDIAN)
+      sizeBytes.putInt(10) // claim 10 bytes
+      zstd.write(sizeBytes.array())
+      zstd.write(Array[Byte](1, 2, 3)) // only write 3
+      zstd.close()
+      TokenedEvents(Chunk(ByteBuffer.wrap(baos.toByteArray)), token)
+    }
+
+  // A compressed batch with one parseable event and one arbitrarily large record that
+  // the decompressor will reject as exceeding `maxBytesSinglePayload`.
+  def goodWithOversizedRecord(optCollectorTstamp: Option[Instant] = None, oversizedBytes: Int): IO[TokenedEvents] =
+    for {
+      ack <- IO.unique
+      id <- IO.randomUUID
+      now <- IO.realTimeInstant
+      collectorTstamp = optCollectorTstamp.fold(now)(identity)
+    } yield {
+      val goodTsv   = Event.minimal(id, collectorTstamp, "0.0.0", "0.0.0").toTsv.getBytes(StandardCharsets.UTF_8)
+      val oversized = Array.fill[Byte](oversizedBytes)('a'.toByte)
+      TokenedEvents(Chunk(compress(zstdFactory, List(goodTsv, oversized))), ack)
+    }
+
+  private def mkEventBytes(n: Int, optCollectorTstamp: Option[Instant]): IO[(Unique.Token, List[Array[Byte]])] =
+    for {
+      ack <- IO.unique
+      ids <- List.fill(n)(IO.randomUUID).sequence
+      now <- IO.realTimeInstant
+      collectorTstamp = optCollectorTstamp.fold(now)(identity)
+    } yield {
+      val bytes = ids.map(id => Event.minimal(id, collectorTstamp, "0.0.0", "0.0.0").toTsv.getBytes(StandardCharsets.UTF_8))
+      (ack, bytes)
+    }
+
+  private def compress(factory: Compressor.Factory, tsvBytes: List[Array[Byte]]): ByteBuffer = {
+    val compressor = factory.buildAndInitialize(1000000, 1)
+    tsvBytes.foreach { b =>
+      val _ = compressor.addRecord(b, 0, b.length)
+    }
+    compressor.result
+  }
 }

@@ -8,16 +8,14 @@
  */
 package com.snowplowanalytics.snowplow.bigquery
 
-import cats.Functor
-import cats.effect.Async
-import cats.effect.kernel.Ref
+import cats.effect.{Async, Resource, Sync}
 import cats.implicits._
 import fs2.Stream
 
 import com.snowplowanalytics.snowplow.streams.SourceAndAck
 import com.snowplowanalytics.snowplow.runtime.{Metrics => CommonMetrics}
 
-import scala.concurrent.duration.{Duration, FiniteDuration}
+import scala.concurrent.duration.FiniteDuration
 
 trait Metrics[F[_]] {
   def addGood(count: Long): F[Unit]
@@ -25,78 +23,30 @@ trait Metrics[F[_]] {
   def setLatency(latency: FiniteDuration): F[Unit]
   def setE2ELatency(e2eLatency: FiniteDuration): F[Unit]
 
+  def scrape: F[String]
   def report: Stream[F, Nothing]
 }
 
 object Metrics {
 
-  def build[F[_]: Async](config: Config.Metrics, sourceAndAck: SourceAndAck[F]): F[Metrics[F]] =
-    Ref.ofEffect(State.initialize(sourceAndAck)).map(impl(config, _, sourceAndAck))
-
-  private case class State(
-    good: Long,
-    bad: Long,
-    latency: FiniteDuration,
-    e2eLatency: Option[FiniteDuration]
-  ) extends CommonMetrics.State {
-    def toKVMetrics: List[CommonMetrics.KVMetric] =
-      List(
-        KVMetric.CountGood(good),
-        KVMetric.CountBad(bad),
-        KVMetric.Latency(latency)
-      ) ++ e2eLatency.map(KVMetric.E2ELatency(_))
-  }
-
-  private object State {
-    def initialize[F[_]: Functor](sourceAndAck: SourceAndAck[F]): F[State] =
-      sourceAndAck.currentStreamLatency.map { latency =>
-        State(0L, 0L, latency.getOrElse(Duration.Zero), None)
-      }
-  }
-
-  private def impl[F[_]: Async](
+  def build[F[_]: Async](
     config: Config.Metrics,
-    ref: Ref[F, State],
     sourceAndAck: SourceAndAck[F]
-  ): Metrics[F] =
-    new CommonMetrics[F, State](ref, State.initialize(sourceAndAck), config.statsd) with Metrics[F] {
-      def addGood(count: Long): F[Unit] =
-        ref.update(s => s.copy(good = s.good + count))
-      def addBad(count: Long): F[Unit] =
-        ref.update(s => s.copy(bad = s.bad + count))
-      def setLatency(latency: FiniteDuration): F[Unit] =
-        ref.update(s => s.copy(latency = s.latency.max(latency)))
-      def setE2ELatency(e2eLatency: FiniteDuration): F[Unit] =
-        ref.update { state =>
-          val newLatency = state.e2eLatency.fold(e2eLatency)(_.max(e2eLatency))
-          state.copy(e2eLatency = Some(newLatency))
-        }
-    }
+  ): Resource[F, Metrics[F]] =
+    CommonMetrics.build(config.statsd, config.prometheus).evalMap { entries =>
+      for {
+        goodCounter <- entries.counter("events_good")
+        badCounter <- entries.counter("events_bad")
+        latencyTimer <- entries.timer("latency_millis", sourceAndAck.currentStreamLatency)
+        e2eTimer <- entries.timer("e2e_latency_millis", Sync[F].pure(None))
+      } yield new Metrics[F] {
+        def addGood(count: Long): F[Unit]                      = goodCounter.add(count)
+        def addBad(count: Long): F[Unit]                       = badCounter.add(count)
+        def setLatency(latency: FiniteDuration): F[Unit]       = latencyTimer.record(latency)
+        def setE2ELatency(e2eLatency: FiniteDuration): F[Unit] = e2eTimer.record(e2eLatency)
 
-  private object KVMetric {
-
-    final case class CountGood(v: Long) extends CommonMetrics.KVMetric {
-      val key        = "events_good"
-      val value      = v.toString
-      val metricType = CommonMetrics.MetricType.Count
+        def scrape: F[String]          = entries.scrape
+        def report: Stream[F, Nothing] = entries.report
+      }
     }
-
-    final case class CountBad(v: Long) extends CommonMetrics.KVMetric {
-      val key        = "events_bad"
-      val value      = v.toString
-      val metricType = CommonMetrics.MetricType.Count
-    }
-
-    final case class Latency(v: FiniteDuration) extends CommonMetrics.KVMetric {
-      val key        = "latency_millis"
-      val value      = v.toMillis.toString
-      val metricType = CommonMetrics.MetricType.Gauge
-    }
-
-    final case class E2ELatency(v: FiniteDuration) extends CommonMetrics.KVMetric {
-      val key        = "e2e_latency_millis"
-      val value      = v.toMillis.toString
-      val metricType = CommonMetrics.MetricType.Gauge
-    }
-  }
 }

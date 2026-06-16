@@ -8,7 +8,6 @@
  */
 package com.snowplowanalytics.snowplow.bigquery
 
-import cats.Id
 import io.circe.Decoder
 import io.circe.generic.extras.semiauto._
 import io.circe.generic.extras.Configuration
@@ -18,9 +17,10 @@ import com.comcast.ip4s.Port
 import scala.concurrent.duration.FiniteDuration
 import com.snowplowanalytics.iglu.client.resolver.Resolver.ResolverConfig
 import com.snowplowanalytics.iglu.core.SchemaCriterion
-import com.snowplowanalytics.snowplow.runtime.{AcceptedLicense, HttpClient, Metrics => CommonMetrics, Retrying, Telemetry, Webhook}
+import com.snowplowanalytics.snowplow.runtime.{AcceptedLicense, HttpClient, Metrics => CommonMetrics, Retrying, Sentry, Telemetry, Webhook}
 import com.snowplowanalytics.iglu.core.circe.CirceIgluCodecs.schemaCriterionDecoder
 import com.snowplowanalytics.snowplow.runtime.HealthProbe.decoders._
+import com.snowplowanalytics.snowplow.streams.compression.DecompressionConfig
 
 case class Config[+Factory, +Source, +Sink](
   input: Source,
@@ -36,6 +36,7 @@ case class Config[+Factory, +Source, +Sink](
   legacyColumns: List[SchemaCriterion],
   legacyColumnMode: Boolean,
   exitOnMissingIgluSchema: Boolean,
+  decompression: DecompressionConfig,
   http: Config.Http
 )
 
@@ -53,11 +54,8 @@ object Config {
     project: String,
     dataset: String,
     table: String,
-    gcpUserAgent: GcpUserAgent,
     credentials: Option[String]
   )
-
-  case class GcpUserAgent(productName: String)
 
   case class Batching(
     maxBytes: Long,
@@ -68,21 +66,15 @@ object Config {
   case class CpuParallelism(parseBytesFactor: BigDecimal, transformFactor: BigDecimal)
 
   case class Metrics(
-    statsd: Option[CommonMetrics.StatsdConfig]
+    statsd: Option[CommonMetrics.StatsdConfig],
+    prometheus: CommonMetrics.PrometheusConfig
   )
-
-  case class SentryM[M[_]](
-    dsn: M[String],
-    tags: Map[String, String]
-  )
-
-  type Sentry = SentryM[Id]
 
   case class HealthProbe(port: Port, unhealthyLatency: FiniteDuration)
 
   case class Monitoring(
     metrics: Metrics,
-    sentry: Option[Sentry],
+    sentry: Option[Sentry.Config],
     healthProbe: HealthProbe,
     webhook: Webhook.Config
   )
@@ -105,18 +97,12 @@ object Config {
       sink <- Decoder[Sink]
       maxSize <- deriveConfiguredDecoder[MaxRecordSize]
     } yield SinkWithMaxSize(sink, maxSize.maxRecordSize)
-    implicit val userAgent   = deriveConfiguredDecoder[GcpUserAgent]
-    implicit val bigquery    = deriveConfiguredDecoder[BigQuery]
-    implicit val output      = deriveConfiguredDecoder[Output[Sink]]
-    implicit val batching    = deriveConfiguredDecoder[Batching]
-    implicit val parallelism = deriveConfiguredDecoder[CpuParallelism]
-    implicit val sentryDecoder = deriveConfiguredDecoder[SentryM[Option]]
-      .map[Option[Sentry]] {
-        case SentryM(Some(dsn), tags) =>
-          Some(SentryM[Id](dsn, tags))
-        case SentryM(None, _) =>
-          None
-      }
+    implicit val bigquery           = deriveConfiguredDecoder[BigQuery]
+    implicit val output             = deriveConfiguredDecoder[Output[Sink]]
+    implicit val batching           = deriveConfiguredDecoder[Batching]
+    implicit val parallelism        = deriveConfiguredDecoder[CpuParallelism]
+    implicit val sentryDecoder      = Sentry.ConfigM.sentryDecoder
+    implicit val prometheusDecoder  = deriveConfiguredDecoder[CommonMetrics.PrometheusConfig]
     implicit val metricsDecoder     = deriveConfiguredDecoder[Metrics]
     implicit val healthProbeDecoder = deriveConfiguredDecoder[HealthProbe]
     implicit val monitoringDecoder  = deriveConfiguredDecoder[Monitoring]

@@ -16,10 +16,16 @@ import org.http4s.implicits.http4sLiteralsSyntax
 import org.specs2.Specification
 
 import com.snowplowanalytics.iglu.core.SchemaCriterion
-import com.snowplowanalytics.snowplow.bigquery.Config.GcpUserAgent
-import com.snowplowanalytics.snowplow.runtime.Metrics.StatsdConfig
-import com.snowplowanalytics.snowplow.runtime.{AcceptedLicense, ConfigParser, HttpClient, Retrying, Telemetry, Webhook}
-import com.snowplowanalytics.snowplow.streams.kinesis.{BackoffPolicy, KinesisSinkConfig, KinesisSinkConfigM, KinesisSourceConfig}
+import com.snowplowanalytics.snowplow.runtime.{Metrics => CommonMetrics}
+import com.snowplowanalytics.snowplow.runtime.{AcceptedLicense, ConfigParser, HttpClient, Retrying, Sentry, Telemetry, Webhook}
+import com.snowplowanalytics.snowplow.streams.compression.DecompressionConfig
+import com.snowplowanalytics.snowplow.streams.kinesis.{
+  BackoffPolicy,
+  KinesisHttpSourceConfig,
+  KinesisSinkConfig,
+  KinesisSinkConfigM,
+  KinesisSourceConfig
+}
 
 import java.nio.file.Paths
 import scala.concurrent.duration.DurationInt
@@ -48,37 +54,41 @@ class KinesisConfigSpec extends Specification with CatsEffect {
       )
     )
 
-  private def assert(resource: String, expectedResult: Either[ExitCode, Config[Unit, KinesisSourceConfig, KinesisSinkConfig]]) = {
+  private def assert(resource: String, expectedResult: Either[ExitCode, Config[Unit, KinesisHttpSourceConfig, KinesisSinkConfig]]) = {
     val path = Paths.get(getClass.getResource(resource).toURI)
-    ConfigParser.configFromFile[IO, Config[Unit, KinesisSourceConfig, KinesisSinkConfig]](path).value.map { result =>
+    ConfigParser.configFromFile[IO, Config[Unit, KinesisHttpSourceConfig, KinesisSinkConfig]](path).value.map { result =>
       result must beEqualTo(expectedResult)
     }
   }
 }
 
 object KinesisConfigSpec {
-  private val minimalConfig = Config[Unit, KinesisSourceConfig, KinesisSinkConfig](
-    input = KinesisSourceConfig(
-      appName                          = "snowplow-bigquery-loader",
-      streamName                       = "snowplow-enriched-events",
-      workerIdentifier                 = "test-hostname",
-      initialPosition                  = KinesisSourceConfig.InitialPosition.Latest,
-      retrievalMode                    = KinesisSourceConfig.Retrieval.Polling(1000),
-      customEndpoint                   = None,
-      dynamodbCustomEndpoint           = None,
-      cloudwatchCustomEndpoint         = None,
-      leaseDuration                    = 10.seconds,
-      maxLeasesToStealAtOneTimeFactor  = BigDecimal("2.0"),
-      checkpointThrottledBackoffPolicy = BackoffPolicy(minBackoff = 100.millis, maxBackoff = 1.second),
-      debounceCheckpoints              = 10.seconds
+  private val minimalConfig = Config[Unit, KinesisHttpSourceConfig, KinesisSinkConfig](
+    input = KinesisHttpSourceConfig(
+      KinesisSourceConfig(
+        appName                          = "snowplow-bigquery-loader",
+        streamName                       = "snowplow-enriched-events",
+        workerIdentifier                 = "test-hostname",
+        initialPosition                  = KinesisSourceConfig.InitialPosition.Latest,
+        retrievalMode                    = KinesisSourceConfig.Retrieval.Polling(750, 1500.millis),
+        customEndpoint                   = None,
+        dynamodbCustomEndpoint           = None,
+        cloudwatchCustomEndpoint         = None,
+        leaseDuration                    = 10.seconds,
+        maxLeasesToStealAtOneTimeFactor  = BigDecimal("2.0"),
+        checkpointThrottledBackoffPolicy = BackoffPolicy(minBackoff = 100.millis, maxBackoff = 1.second),
+        debounceCheckpoints              = 10.seconds,
+        maxRetries                       = 10,
+        apiCallAttemptTimeout            = 15.seconds
+      ),
+      None
     ),
     output = Config.Output(
       good = Config.BigQuery(
-        project      = "my-project",
-        dataset      = "my-dataset",
-        table        = "events",
-        gcpUserAgent = GcpUserAgent(productName = "Snowplow OSS"),
-        credentials  = None
+        project     = "my-project",
+        dataset     = "my-dataset",
+        table       = "events",
+        credentials = None
       ),
       bad = Config.SinkWithMaxSize(
         sink = KinesisSinkConfigM[Id](
@@ -106,7 +116,7 @@ object KinesisConfigSpec {
       setupErrors     = Retrying.Config.ForSetup(delay = 30.seconds),
       transientErrors = Retrying.Config.ForTransient(delay = 1.second, attempts = 5),
       alterTableWait  = Config.AlterTableWaitRetries(delay = 1.second),
-      tooManyColumns  = Config.TooManyColumnsRetries(delay = 300.seconds)
+      tooManyColumns  = Config.TooManyColumnsRetries(delay = 5.minutes)
     ),
     telemetry = Telemetry.Config(
       disable         = false,
@@ -118,7 +128,7 @@ object KinesisConfigSpec {
       moduleVersion   = None
     ),
     monitoring = Config.Monitoring(
-      metrics     = Config.Metrics(None),
+      metrics     = Config.Metrics(None, CommonMetrics.PrometheusConfig(Map.empty)),
       sentry      = None,
       healthProbe = Config.HealthProbe(port = Port.fromInt(8000).get, unhealthyLatency = 5.minutes),
       webhook     = Webhook.Config(endpoint = None, tags = Map.empty, heartbeat = 5.minutes)
@@ -128,32 +138,37 @@ object KinesisConfigSpec {
     legacyColumns           = List.empty,
     legacyColumnMode        = false,
     exitOnMissingIgluSchema = true,
+    decompression           = DecompressionConfig(maxBytesInBatch = 5242880, maxBytesSinglePayload = 10000000),
     http                    = Config.Http(HttpClient.Config(4))
   )
 
   // workerIdentifer coming from "HOSTNAME" env variable set in BuildSettings
-  private val extendedConfig = Config[Unit, KinesisSourceConfig, KinesisSinkConfig](
-    input = KinesisSourceConfig(
-      appName                          = "snowplow-bigquery-loader",
-      streamName                       = "snowplow-enriched-events",
-      workerIdentifier                 = "test-hostname",
-      initialPosition                  = KinesisSourceConfig.InitialPosition.TrimHorizon,
-      retrievalMode                    = KinesisSourceConfig.Retrieval.Polling(1000),
-      customEndpoint                   = None,
-      dynamodbCustomEndpoint           = None,
-      cloudwatchCustomEndpoint         = None,
-      leaseDuration                    = 10.seconds,
-      maxLeasesToStealAtOneTimeFactor  = BigDecimal("2.0"),
-      checkpointThrottledBackoffPolicy = BackoffPolicy(minBackoff = 100.millis, maxBackoff = 1.second),
-      debounceCheckpoints              = 10.seconds
+  private val extendedConfig = Config[Unit, KinesisHttpSourceConfig, KinesisSinkConfig](
+    input = KinesisHttpSourceConfig(
+      KinesisSourceConfig(
+        appName                          = "snowplow-bigquery-loader",
+        streamName                       = "snowplow-enriched-events",
+        workerIdentifier                 = "test-hostname",
+        initialPosition                  = KinesisSourceConfig.InitialPosition.TrimHorizon,
+        retrievalMode                    = KinesisSourceConfig.Retrieval.Polling(1000, 1500.millis),
+        customEndpoint                   = None,
+        dynamodbCustomEndpoint           = None,
+        cloudwatchCustomEndpoint         = None,
+        leaseDuration                    = 10.seconds,
+        maxLeasesToStealAtOneTimeFactor  = BigDecimal("2.0"),
+        checkpointThrottledBackoffPolicy = BackoffPolicy(minBackoff = 100.millis, maxBackoff = 1.second),
+        debounceCheckpoints              = 10.seconds,
+        maxRetries                       = 10,
+        apiCallAttemptTimeout            = 15.seconds
+      ),
+      None
     ),
     output = Config.Output(
       good = Config.BigQuery(
-        project      = "my-project",
-        dataset      = "my-dataset",
-        table        = "events",
-        gcpUserAgent = GcpUserAgent(productName = "Snowplow OSS"),
-        credentials  = None
+        project     = "my-project",
+        dataset     = "my-dataset",
+        table       = "events",
+        credentials = None
       ),
       bad = Config.SinkWithMaxSize(
         sink = KinesisSinkConfigM[Id](
@@ -195,16 +210,17 @@ object KinesisConfigSpec {
     monitoring = Config.Monitoring(
       metrics = Config.Metrics(
         statsd = Some(
-          StatsdConfig(
+          CommonMetrics.StatsdConfig(
             hostname = "127.0.0.1",
             port     = 8125,
             tags     = Map("myTag" -> "xyz"),
             period   = 1.minute,
             prefix   = "snowplow.bigquery.loader"
           )
-        )
+        ),
+        prometheus = CommonMetrics.PrometheusConfig(Map("myTag" -> "xyz"))
       ),
-      sentry = Some(Config.SentryM[Id](dsn = "https://public@sentry.example.com/1", tags = Map("myTag" -> "xyz"))),
+      sentry = Some(Sentry.ConfigM[Id](dsn = "https://public@sentry.example.com/1", environment = None, tags = Map("myTag" -> "xyz"))),
       healthProbe = Config.HealthProbe(
         port             = Port.fromInt(8000).get,
         unhealthyLatency = 5.minutes
@@ -225,6 +241,7 @@ object KinesisConfigSpec {
     ),
     legacyColumnMode        = false,
     exitOnMissingIgluSchema = true,
+    decompression           = DecompressionConfig(maxBytesInBatch = 5242880, maxBytesSinglePayload = 10000000),
     http                    = Config.Http(HttpClient.Config(4))
   )
 }

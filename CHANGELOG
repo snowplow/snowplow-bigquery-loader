@@ -1,3 +1,11 @@
+Version 2.2.0 (2026-05-06)
+--------------------------
+Bump dependencies (#18)
+Add decompression (#16)
+Add Claude Code GitHub Action workflow (#15)
+Update GCP useragent attribution (#14)
+Fix PUBLIC_REPO_URL in sync-public-main.yml
+
 Version 2.1.0 (2025-01-13)
 --------------------------
 Override dependencies to fix CVEs

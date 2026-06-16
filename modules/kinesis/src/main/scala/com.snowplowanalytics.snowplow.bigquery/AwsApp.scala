@@ -10,9 +10,9 @@ package com.snowplowanalytics.snowplow.bigquery
 
 import cats.effect.IO
 
-import com.snowplowanalytics.snowplow.streams.kinesis.{KinesisFactory, KinesisSinkConfig, KinesisSourceConfig}
+import com.snowplowanalytics.snowplow.streams.kinesis.{KinesisFactory, KinesisHttpSourceConfig, KinesisSinkConfig}
 
-object AwsApp extends LoaderApp[Unit, KinesisSourceConfig, KinesisSinkConfig](BuildInfo) {
+object AwsApp extends LoaderApp[Unit, KinesisHttpSourceConfig, KinesisSinkConfig](BuildInfo) {
 
   override def toFactory: FactoryProvider = _ => KinesisFactory.resource[IO]
 
