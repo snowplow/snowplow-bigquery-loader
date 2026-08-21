@@ -22,17 +22,20 @@ object Dependencies {
 
     // java
     val slf4j           = "2.0.17"
-    val azureSdk        = "1.18.3"
+    val azureSdk        = "1.18.4"
     val sentry          = "6.25.2"
     val awsSdk2         = "2.44.2"
     val bigqueryStorage = "3.19.0"
     val bigquery        = "2.57.1"
-    val netty           = "4.1.133.Final"
+    val netty           = "4.1.135.Final"
     val kafkaClients    = "3.9.2"
     val lz4Java         = "1.10.1"
+    val jackson         = "2.21.4"
+    val micrometer      = "1.15.12"
+    val openTelemetry   = "1.62.0"
 
     // Snowplow
-    val streams    = "0.24.0"
+    val streams    = "0.24.2"
     val igluClient = "4.2.1"
 
     // tests
@@ -49,19 +52,22 @@ object Dependencies {
   val doobie            = "org.tpolecat" %% "doobie-core"          % V.doobie
 
   // java
-  val slf4j           = "org.slf4j"              % "slf4j-simple"                 % V.slf4j
-  val julToSlf4j      = "org.slf4j"              % "jul-to-slf4j"                 % V.slf4j
-  val azureIdentity   = "com.azure"              % "azure-identity"               % V.azureSdk
-  val sentry          = "io.sentry"              % "sentry"                       % V.sentry
-  val stsSdk2         = "software.amazon.awssdk" % "sts"                          % V.awsSdk2
-  val nettyNioClient  = "software.amazon.awssdk" % "netty-nio-client"             % V.awsSdk2
-  val bigqueryStorage = "com.google.cloud"       % "google-cloud-bigquerystorage" % V.bigqueryStorage
-  val bigquery        = "com.google.cloud"       % "google-cloud-bigquery"        % V.bigquery
-  val nettyCommon     = "io.netty"               % "netty-common"                 % V.netty
-  val nettyCodecHttp  = "io.netty"               % "netty-codec-http"             % V.netty
-  val nettyCodecHttp2 = "io.netty"               % "netty-codec-http2"            % V.netty
-  val kafkaClients    = "org.apache.kafka"       % "kafka-clients"                % V.kafkaClients exclude ("org.lz4", "lz4-java")
-  val lz4Java         = "at.yawk.lz4"            % "lz4-java"                     % V.lz4Java
+  val slf4j           = "org.slf4j"                  % "slf4j-simple"                 % V.slf4j
+  val julToSlf4j      = "org.slf4j"                  % "jul-to-slf4j"                 % V.slf4j
+  val azureIdentity   = "com.azure"                  % "azure-identity"               % V.azureSdk
+  val sentry          = "io.sentry"                  % "sentry"                       % V.sentry
+  val stsSdk2         = "software.amazon.awssdk"     % "sts"                          % V.awsSdk2
+  val nettyNioClient  = "software.amazon.awssdk"     % "netty-nio-client"             % V.awsSdk2
+  val bigqueryStorage = "com.google.cloud"           % "google-cloud-bigquerystorage" % V.bigqueryStorage
+  val bigquery        = "com.google.cloud"           % "google-cloud-bigquery"        % V.bigquery
+  val nettyCommon     = "io.netty"                   % "netty-common"                 % V.netty
+  val nettyCodecHttp  = "io.netty"                   % "netty-codec-http"             % V.netty
+  val nettyCodecHttp2 = "io.netty"                   % "netty-codec-http2"            % V.netty
+  val kafkaClients    = "org.apache.kafka"           % "kafka-clients"                % V.kafkaClients exclude ("org.lz4", "lz4-java")
+  val lz4Java         = "at.yawk.lz4"                % "lz4-java"                     % V.lz4Java
+  val jacksonDatabind = "com.fasterxml.jackson.core" % "jackson-databind"             % V.jackson
+  val micrometerCore  = "io.micrometer"              % "micrometer-core"              % V.micrometer
+  val openTelemetry   = "io.opentelemetry"           % "opentelemetry-api"            % V.openTelemetry
 
   val streamsCore      = "com.snowplowanalytics" %% "streams-core"             % V.streams
   val kinesis          = "com.snowplowanalytics" %% "kinesis"                  % V.streams
@@ -88,6 +94,9 @@ object Dependencies {
     sentry,
     doobie,
     circeGenericExtra,
+    jacksonDatabind, // for security vulnerabilities — iglu-scala-client 4.2.1 declares 2.21.2
+    micrometerCore, // for security vulnerabilities — runtime-common 0.24.2 declares 1.14.4, no fix in 1.14 line
+    openTelemetry, // for security vulnerabilities — google-cloud-bigquery 2.57.1 declares 1.52.0
     specs2,
     catsEffectSpecs2,
     catsEffectTestkit,
@@ -101,8 +110,6 @@ object Dependencies {
     slf4j      % Runtime,
     julToSlf4j % Runtime,
     azureIdentity,
-    nettyCodecHttp, // for security vulnerabilities — upstream parents max at 4.1.132 declaration
-    nettyCodecHttp2, // for security vulnerabilities — same
     kafkaClients,
     lz4Java, // substitute for excluded org.lz4:lz4-java
     specs2,
