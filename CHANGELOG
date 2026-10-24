@@ -1,3 +1,8 @@
+Version 2.2.2 (2026-10-24)
+--------------------------
+ITS-2185: chore(ci): remove Snyk steps (#33)
+Point the Snowman rollout summary at #pipeline-rollouts (#27)
+
 Version 2.2.1 (2026-07-03)
 --------------------------
 Fix CVEs reported by Snyk (#24)
